@@ -1,0 +1,3 @@
+[submodule "steering-vectors"]
+	path = steering-vectors
+	url = git@github.com:thealexanderd/steering-vectors.git
