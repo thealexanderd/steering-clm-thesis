@@ -1,4 +1,15 @@
 import torch
+import torch.serialization as _ts
+
+_old_load = torch.load
+
+def _load_legacy(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)  # restore legacy default
+    return _old_load(*args, **kwargs)
+
+# Patch both entry points
+torch.load = _load_legacy
+_ts.load = _load_legacy
 import pandas as pd
 from steering_vectors import (
     train_steering_vector,
@@ -293,19 +304,19 @@ def plixer_generate_smiles(
   # repeat predicted_ligand voxel batch_size times
   predicted_ligand_voxels = output['predicted_ligand_voxels']
   predicted_ligand_voxels = predicted_ligand_voxels.repeat(batch_size, 1, 1, 1, 1)
-  no_context_sample = model_plixer.vox2smiles_model.generate_smiles(
-    predicted_ligand_voxels[:1],
-    do_sample=False,
-    max_attempts=10,
-  )
-  with ctx2:
-    with_context_sample = model_plixer.vox2smiles_model.generate_smiles(
-      predicted_ligand_voxels[:1],
-      do_sample=False,
-      max_attempts=10,
-    )
-  print(no_context_sample)
-  print(with_context_sample)
+  # no_context_sample = model_plixer.vox2smiles_model.generate_smiles(
+  #   predicted_ligand_voxels[:1],
+  #   do_sample=False,
+  #   max_attempts=10,
+  # )
+  # with ctx2:
+  #   with_context_sample = model_plixer.vox2smiles_model.generate_smiles(
+  #     predicted_ligand_voxels[:1],
+  #     do_sample=False,
+  #     max_attempts=10,
+  #   )
+  # print(no_context_sample)
+  # print(with_context_sample)
   with ctx:
     # Generate num_samples SMILES by repeated sampling from the decoder conditioned on predicted voxels
     needed = num_samples
@@ -317,6 +328,7 @@ def plixer_generate_smiles(
           max_attempts=10,
       )
       total_generated += len(smiles_batch)
+      print(total_generated)
       for s in smiles_batch:
         if s is None or len(s) == 0:
           invalid_generated += 1
@@ -479,6 +491,31 @@ def _pair_by_lipophilicity_plixer(smiles: list[str], duplicates: bool = True):
         pairs.append((smiles[i], smiles[j]))
         flag = True
       elif 1 <= logpj <= 3 and (logpi < 1 or logpi > 3):
+        pairs.append((smiles[j], smiles[i]))
+        flag = True
+      if not duplicates and flag:
+        flag = False
+        break
+  return pairs
+
+
+def _pair_by_lipophilicity_plixer_alt(smiles: list[str], duplicates: bool = True):
+  from helpers import predict_logp
+  pairs = []
+  length_i = len(smiles)
+  flag = False
+  for i in range(length_i):
+    for j in range(i + 1, length_i):
+      logpi = predict_logp(smiles[i])
+      if logpi is None:
+        continue
+      logpj = predict_logp(smiles[j])
+      if logpj is None:
+        continue
+      if logpi >= 1 and logpj < 1 or (logpi<=3 and logpj>3):
+        pairs.append((smiles[i], smiles[j]))
+        flag = True
+      elif logpj >= 1 and logpi < 1 or (logpj<=3 and logpi>3):
         pairs.append((smiles[j], smiles[i]))
         flag = True
       if not duplicates and flag:
@@ -663,21 +700,23 @@ def plixer_generate_steering_vector_lipophilicity(
     dtype: torch.dtype = torch.float32,
     duplicates=True,
 ):
-  while True:
-    smiles, _, _ = plixer_generate_smiles(
-        pdb_file,
-        ligand_file=ligand_file,
-        center=center,
-        num_samples=num_to_generate,
-        temperature=temperature,
-        vox2smiles_ckpt_path=vox2smiles_ckpt_path,
-        poc2mol_ckpt_path=poc2mol_ckpt_path,
-        seed=seed,
-        dtype=dtype,
-    )
-    pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
-    if len(pairs) > 0:
-      break
+  smiles, _, _ = plixer_generate_smiles(
+      pdb_file,
+      ligand_file=ligand_file,
+      center=center,
+      num_samples=num_to_generate,
+      temperature=temperature,
+      vox2smiles_ckpt_path=vox2smiles_ckpt_path,
+      poc2mol_ckpt_path=poc2mol_ckpt_path,
+      seed=seed,
+      dtype=dtype,
+  )
+
+  pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
+  if len(pairs) == 0:
+    pairs = _pair_by_lipophilicity_plixer_alt(smiles, duplicates=duplicates)
+  if len(pairs) == 0:
+    return None, None, smiles
   vec = _train_vec_from_pairs_plixer(pairs, layer, token_index, field=False, dtype=dtype)
   return vec, len(pairs), pairs
 
@@ -697,21 +736,24 @@ def plixer_generate_steering_vector_lipophilicity_field(
     dtype: torch.dtype = torch.float32,
     duplicates=True,
 ):
-  while True:
-    smiles, _, _ = plixer_generate_smiles(
-        pdb_file,
-        ligand_file=ligand_file,
-        center=center,
-        num_samples=num_to_generate,
-        temperature=temperature,
-        vox2smiles_ckpt_path=vox2smiles_ckpt_path,
-        poc2mol_ckpt_path=poc2mol_ckpt_path,
-        seed=seed,
-        dtype=dtype,
-    )
-    pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
-    if len(pairs) > 0:
-      break
+  smiles, _, _ = plixer_generate_smiles(
+      pdb_file,
+      ligand_file=ligand_file,
+      center=center,
+      num_samples=num_to_generate,
+      temperature=temperature,
+      vox2smiles_ckpt_path=vox2smiles_ckpt_path,
+      poc2mol_ckpt_path=poc2mol_ckpt_path,
+      seed=seed,
+      dtype=dtype,
+  )
+  
+  pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
+  if len(pairs) == 0:
+    pairs = _pair_by_lipophilicity_plixer_alt(smiles, duplicates=duplicates)
+  if len(pairs) == 0:
+    return None, None, smiles
+
   vec = _train_vec_from_pairs_plixer(pairs, layer, token_index, field=True, dtype=dtype)
   return vec, len(pairs), pairs
 
