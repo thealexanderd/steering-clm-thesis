@@ -146,7 +146,7 @@ Experiments generate several outputs in the `data/figures/` directory:
 1. **Setup Environment**:
    ```bash
    pip install -r requirements.txt
-   pip install steering-vectors
+   cd steering-vectors && pip install . && cd ..
    ```
 
 2. **Configure Experiment**:
