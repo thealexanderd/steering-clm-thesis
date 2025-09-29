@@ -736,24 +736,21 @@ def plixer_generate_steering_vector_lipophilicity_field(
     dtype: torch.dtype = torch.float32,
     duplicates=True,
 ):
-  smiles, _, _ = plixer_generate_smiles(
-      pdb_file,
-      ligand_file=ligand_file,
-      center=center,
-      num_samples=num_to_generate,
-      temperature=temperature,
-      vox2smiles_ckpt_path=vox2smiles_ckpt_path,
-      poc2mol_ckpt_path=poc2mol_ckpt_path,
-      seed=seed,
-      dtype=dtype,
-  )
-  
-  pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
-  if len(pairs) == 0:
-    pairs = _pair_by_lipophilicity_plixer_alt(smiles, duplicates=duplicates)
-  if len(pairs) == 0:
-    return None, None, smiles
-
+  while True:
+    smiles, _, _ = plixer_generate_smiles(
+        pdb_file,
+        ligand_file=ligand_file,
+        center=center,
+        num_samples=num_to_generate,
+        temperature=temperature,
+        vox2smiles_ckpt_path=vox2smiles_ckpt_path,
+        poc2mol_ckpt_path=poc2mol_ckpt_path,
+        seed=seed,
+        dtype=dtype,
+    )
+    pairs = _pair_by_lipophilicity_plixer(smiles, duplicates=duplicates)
+    if len(pairs) > 0:
+      break
   vec = _train_vec_from_pairs_plixer(pairs, layer, token_index, field=True, dtype=dtype)
   return vec, len(pairs), pairs
 

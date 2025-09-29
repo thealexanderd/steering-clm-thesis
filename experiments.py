@@ -62,15 +62,20 @@ def perform_experiments(
         pandas.DataFrame: DataFrame containing statistics and results for each protein sequence.
     """
     
+    filename_prefix = f"{filename_prefix}{experiment}/"
     os.makedirs(filename_prefix, exist_ok=True)
     os.makedirs(f"{filename_prefix}smiles/", exist_ok=True)
 
+    # columns = [
+    #     "uniprot_id", "no_steering", "steering", "neg_steering",
+    #     "no_steering_total_generated", "no_steering_total_returned", "no_steering_invalid_generated", "no_steering_uniqiue",
+    #     "steering_total_generated", "steering_total_returned", "steering_invalid_generated", "steering_unique",
+    #     "p_value_no_pos", "p_value_no_neg", "ks_no_pos", "ks_no_neg", "num_training_pairs", "rate_of_training_positive", "rate_of_training_negative"
+    # ]
     columns = [
-        "uniprot_id", "no_steering", "steering", "neg_steering",
-        "no_steering_total_generated", "no_steering_total_returned", "no_steering_invalid_generated", "no_steering_uniqiue",
+        "uniprot_id", "no_steering", "steering",
         "steering_total_generated", "steering_total_returned", "steering_invalid_generated", "steering_unique",
-        "negative_steering_total_generated", "negative_steering_total_returned", "negative_steering_invalid_generated", "negative_steering_unique",
-        "p_value_no_pos", "p_value_no_neg", "ks_no_pos", "ks_no_neg", "num_training_pairs", "rate_of_training_positive", "rate_of_training_negative"
+        "p_value_no_pos", "num_training_pairs", "rate_of_training_positive", "rate_of_training_negative"
     ]
     data = pd.DataFrame(columns=columns)
 
@@ -105,6 +110,11 @@ def perform_experiments(
                 dtype=eval(plixer_dtype) if isinstance(plixer_dtype, str) else plixer_dtype,
                 duplicates=duplicates if duplicates is not None else True,
             )
+
+            if vec is None:
+              with open(f"{filename_prefix}smiles/{uid}_didnt_work.pkl", "wb") as f:
+                pickle.dump(pairs, f)
+              continue
 
             with open(f"{filename_prefix}smiles/{uid}_pairs.pkl", "wb") as f:
                 pickle.dump(pairs, f)
@@ -144,24 +154,7 @@ def perform_experiments(
                     temperature=plixer_temperature,
                     seed=plixer_seed,
                     dtype=eval(plixer_dtype) if isinstance(plixer_dtype, str) else plixer_dtype,
-                ),
-                evaluate_group_plixer(
-                    "negative_steering",
-                    vec,
-                    multiplier=-multiplier,
-                    pdb_file=pdb,
-                    num_to_generate=num_to_generate,
-                    eval_fn=eval_function,
-                    ligand_file=(ligand_files[i] if ligand_files else None),
-                    center=(centers[i] if centers else None),
-                    tau=tau,
-                    field=field,
-                    vox2smiles_ckpt_path=plixer_vox2smiles_ckpt_path,
-                    poc2mol_ckpt_path=plixer_poc2mol_ckpt_path,
-                    temperature=plixer_temperature,
-                    seed=plixer_seed,
-                    dtype=eval(plixer_dtype) if isinstance(plixer_dtype, str) else plixer_dtype,
-                ),
+                )
             ]
             if None in groups:
                 print(f"PDB {uid} cannot be steered")
@@ -175,10 +168,8 @@ def perform_experiments(
 
             # Compute statistics
             pval_no_pos = stats.ttest_ind(group_map["no_steering"]["scores"], group_map["steering"]["scores"], equal_var=False).pvalue
-            pval_no_neg = stats.ttest_ind(group_map["no_steering"]["scores"], group_map["negative_steering"]["scores"], equal_var=False).pvalue
 
-            ks_no_pos = stats.ks_2samp(group_map["no_steering"]["scores"], group_map["steering"]["scores"]).pvalue
-            ks_no_neg = stats.ks_2samp(group_map["no_steering"]["scores"], group_map["negative_steering"]["scores"]).pvalue
+            # ks_no_pos = stats.ks_2samp(group_map["no_steering"]["scores"], group_map["steering"]["scores"]).pvalue
 
             # Training pairs exist but are SMILES-only; skip overlap metric
             rate_pos = 0.0
@@ -188,23 +179,16 @@ def perform_experiments(
                 "uniprot_id": uid,
                 "no_steering": np.mean(group_map["no_steering"]["scores"]),
                 "steering": np.mean(group_map["steering"]["scores"]),
-                "neg_steering": np.mean(group_map["negative_steering"]["scores"]),
-                "no_steering_total_generated": group_map["no_steering"]["total_generated"],
-                "no_steering_total_returned": len(group_map["no_steering"]["smiles"]),
-                "no_steering_invalid_generated": group_map["no_steering"]["invalid_generated"],
-                "no_steering_uniqiue": len(group_map["no_steering"]["set"]),
+                # "no_steering_total_generated": group_map["no_steering"]["total_generated"],
+                # "no_steering_total_returned": len(group_map["no_steering"]["smiles"]),
+                # "no_steering_invalid_generated": group_map["no_steering"]["invalid_generated"],
+                # "no_steering_uniqiue": len(group_map["no_steering"]["set"]),
                 "steering_total_generated": group_map["steering"]["total_generated"],
                 "steering_total_returned": len(group_map["steering"]["smiles"]),
                 "steering_invalid_generated": group_map["steering"]["invalid_generated"],
                 "steering_unique": len(group_map["steering"]["set"]),
-                "negative_steering_total_generated": group_map["negative_steering"]["total_generated"],
-                "negative_steering_total_returned": len(group_map["negative_steering"]["smiles"]),
-                "negative_steering_invalid_generated": group_map["negative_steering"]["invalid_generated"],
-                "negative_steering_unique": len(group_map["negative_steering"]["set"]),
                 "p_value_no_pos": pval_no_pos,
-                "p_value_no_neg": pval_no_neg,
-                "ks_no_pos": ks_no_pos,
-                "ks_no_neg": ks_no_neg,
+                # "ks_no_pos": ks_no_pos,
                 "rate_of_training_positive": rate_pos,
                 "rate_of_training_negative": rate_neg,
                 "num_training_pairs": num_pairs,
@@ -293,6 +277,7 @@ def main():
 
     new_list_of_uniprot_ids = ['P07900', 'P00734', 'Q14524', 'P19823', 'P78334', 'P14416', 'P08913', 'P03372', 'P35348', 'P08172', "P09622", "P36956", 'P20309', 'P04818', 'P25100', 'P18825', 'P23634', 'Q8N1C3', 'P78334', 'P03372', 'P48169',  'P10275']
 
+
     protein_sequences = []
     for uid in new_list_of_uniprot_ids:
         sequence = uniprot_to_sequence.get(uid)
@@ -300,21 +285,85 @@ def main():
             protein_sequences.append(sequence)
         else:
             print(f"UniProt ID {uid} not found in the dataset.")
-    
+
+    from pathlib import Path
+
+    root = Path("/content/drive/MyDrive/paper/steering-clm-thesis/models/plixer/data/sampled_10_test_pdbs")  # change to your path
+    pdb_files=[]
+    ligand_files=[]
+
+    for base in ["6zxo_D16_C_401", "6xzs_O5K_A_302", "7nqw_UNW_A_405"]:
+      protein = f"models/plixer/data/sampled_10_test_pdbs/{base}/{base}_protein_refined.pdb"
+      ligand  = f"models/plixer/data/sampled_10_test_pdbs/{base}/{base}_ligand_refined.sdf"
+      pdb_files.append(protein)
+      ligand_files.append(ligand)
+
+    # for folder in sorted(root.iterdir()):
+    #     if folder.is_dir():
+    #         base = folder.name
+    #         protein = f"models/plixer/data/sampled_10_test_pdbs/{base}/{base}_protein_refined.pdb"
+    #         ligand  = f"models/plixer/data/sampled_10_test_pdbs/{base}/{base}_ligand_refined.sdf"
+    #         pdb_files.append(protein)
+    #         ligand_files.append(ligand)
+
+    #         print(folder.name, protein, ligand)
+
+    # pdb_files = ["models/plixer/data/5sry.pdb", "models/plixer/data/agonists/5-MeO-DMT_8fy8.pdb", "models/plixer/data/agonists/LSD_6wgt.pdb"]
+
+    # ligand_files = ["models/plixer/data/5sry_C_RIW.mol2", "models/plixer/data/agonists/5-MeO-DMT_8fy8_E_YFW.mol2", "models/plixer/data/agonists/LSD_6wgt_D_7LD.mol2"]
+
+    # for layer in range(0, 12):
+
+    # results = perform_experiments(
+    #     protein_sequences,
+    #     new_list_of_uniprot_ids,
+    #     filename_prefix=f"/content/drive/MyDrive/paper/ten_prots/field_False/",
+    #     duplicates=True,
+    #     num_to_generate_pairs=50,
+    #     num_to_generate=250,
+    #     experiment="logs",
+    #     token_index=-1,
+    #     layer_index=11,
+    #     multiplier=5,
+    #     field=False,
+    #     use_plixer=True,
+    #     pdb_files=pdb_files[3:],
+    #     ligand_files=ligand_files[3:],
+    #   )
     results = perform_experiments(
         protein_sequences,
         new_list_of_uniprot_ids,
-        filename_prefix="data/figures/",
+        filename_prefix=f"/content/drive/MyDrive/paper/ten_prots/field_False/",
         duplicates=True,
         num_to_generate_pairs=50,
         num_to_generate=250,
-        experiment="size",
+        experiment="logs",
+        token_index=-1,
+        layer_index=11,
+        multiplier=5,
         field=False,
         use_plixer=True,
-        pdb_files=["models/plixer/data/5sry.pdb"],
-        ligand_files=["models/plixer/data/5sry_C_RIW.mol2"],
-
-    )
+        pdb_files=pdb_files,
+        ligand_files=ligand_files,
+      )
+    # for field in [True]:
+    #   for experiment in ["size", "logs", "logp"]:
+    #     results = perform_experiments(
+    #         protein_sequences,
+    #         new_list_of_uniprot_ids,
+    #         filename_prefix=f"/content/drive/MyDrive/paper/ten_prots/field_{field}/",
+    #         duplicates=True,
+    #         num_to_generate_pairs=50,
+    #         num_to_generate=250,
+    #         experiment=experiment,
+    #         token_index=-1,
+    #         layer_index=11,
+    #         multiplier=1,
+    #         field=field,
+    #         use_plixer=True,
+    #         pdb_files=pdb_files,
+    #         ligand_files=ligand_files,
+    #       )
     
     print(results)
 
